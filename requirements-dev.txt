@@ -1,0 +1,4 @@
+-r requirements.txt
+uvicorn==0.54.0
+pytest==9.2.0
+hypothesis==6.170.14
