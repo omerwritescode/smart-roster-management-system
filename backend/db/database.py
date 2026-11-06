@@ -36,6 +36,8 @@ def check_url_shape(url: str) -> None:
         raise NotConfigured(f"DATABASE_URL must start with postgresql://. Paste only the string, with no quotes and no 'DATABASE_URL=' in front. {fix}")
     if "[" in url or "]" in url:
         raise NotConfigured(f"DATABASE_URL still contains square brackets. Replace [YOUR-PASSWORD], including the brackets, with your database password. {fix}")
+    if url.count("@") > 1:
+        raise NotConfigured(f"The password in DATABASE_URL contains an @ symbol, which breaks the connection string. Reset the database password to letters and numbers only. {fix}")
     try:
         parts = urlsplit(url)
         host, port = parts.hostname or "", parts.port
@@ -54,7 +56,7 @@ def describe_connection_failure(text: str) -> str:
         return "Supabase rejected the password in DATABASE_URL. Check it matches your database password, or reset the password in Supabase, then update the variable in Vercel and redeploy."
     if "tenant or user not found" in lowered:
         return "Supabase does not recognise the username or pooler host in DATABASE_URL. Copy the whole Transaction pooler string again from Connect in Supabase, then update the variable in Vercel and redeploy."
-    if any(x in lowered for x in ("could not translate host", "name or service not known", "name resolution", "nodename nor servname", "network is unreachable")):
+    if any(x in lowered for x in ("could not translate host", "failed to resolve host", "name or service not known", "name resolution", "nodename nor servname", "network is unreachable")):
         return "The database host in DATABASE_URL could not be reached. Copy the Transaction pooler string again from Connect in Supabase, then update the variable in Vercel and redeploy."
     if any(x in lowered for x in ("timeout", "timed out")):
         return "The database did not respond in time. Check that the Supabase project is running, and that the pooler string is the current one from Connect."

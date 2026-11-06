@@ -17,6 +17,7 @@ client = TestClient(app, raise_server_exceptions=False)
     (f'"{POOLER}"', "start with postgresql://"),
     ("postgresql://postgres.abc:[YOUR-PASSWORD]@aws-0.pooler.supabase.com:6543/postgres", "square brackets"),
     ("postgresql://postgres.abc:pa/ss@aws-0.pooler.supabase.com:6543/postgres", "symbol"),
+    (f"postgresql://postgres.abc:{SECRET}@1105@aws-0.pooler.supabase.com:6543/postgres", "@ symbol"),
     (f"postgresql://postgres:{SECRET}@db.abcdefgh.supabase.co:5432/postgres", "direct connection"),
     ("postgresql://aws-0.pooler.supabase.com:6543/postgres", "missing its username"),
 ])
@@ -36,6 +37,7 @@ def test_a_good_pooler_string_passes_the_shape_check():
     ('connection to server at "x", port 6543 failed: FATAL:  password authentication failed for user "postgres.abc"', "rejected the password"),
     ("FATAL:  Tenant or user not found", "does not recognise"),
     ('could not translate host name "x" to address: Name or service not known', "could not be reached"),
+    ("failed to resolve host 'x': [Errno 16] Device or resource busy", "could not be reached"),
     ("connection timeout expired", "did not respond"),
     ("FATAL:  Max client connections reached", "too many"),
     ("something unexpected", "Vercel's Logs"),
