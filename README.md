@@ -2,11 +2,11 @@
 
 A working roster tool for an operations team running support and operations for many D2C brands. An operations manager picks a month, generates a roster, sees every coverage gap by name, fixes or overrides each one, sends it through pod lead review, and publishes it. When someone becomes unavailable afterwards, the system shows the impact, ranks who can cover, and builds a new draft with as few changes as possible.
 
-**Live app:** `ADD YOUR VERCEL URL`  
-**Demo video:** `ADD YOUR VIDEO LINK`  
+**Live app:** `https://smart-roster-management-system-silk.vercel.app/`
+**Demo video:** `ADD YOUR VIDEO LINK`
 **Approach note:** [docs/approach-note.md](docs/approach-note.md)
 
-There is no login. Use **View as** at the top right to switch between operations manager, pod lead and employee. **Reset demo data** restores the sample data at any time.
+There is no login. Given more time, a working login system would be created so that user logins would open up specific views of the roster, i.e.,  an 'Employee' view for a login with an employee's account and so on. Use **View as** at the top right to switch between operations manager, pod lead and employee. **Reset demo data** restores the sample data at any time.
 
 ## What it does
 
