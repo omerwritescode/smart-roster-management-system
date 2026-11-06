@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Notification, type Role } from "./api";
 import { useAction, useApp, type Page } from "./state";
@@ -26,6 +27,16 @@ function RoleSwitcher() {
   const pods = setup?.pods ?? [];
   const employees = setup?.employees ?? [];
 
+  // A role picked before the lists load still needs a person or pod once they arrive.
+  useEffect(() => {
+    if (actor.role === "pod_lead" && !actor.podId && pods[0]) {
+      changeActor({ role: "pod_lead", podId: pods[0].id, name: employees.find((e) => e.id === pods[0].lead_employee_id)?.name ?? "Pod lead" });
+    }
+    if (actor.role === "employee" && !actor.employeeId && employees[0]) {
+      changeActor({ role: "employee", employeeId: employees[0].id, name: employees[0].name });
+    }
+  }, [actor, pods, employees, changeActor]);
+
   function choose(role: Role) {
     if (role === "ops_manager") changeActor({ role, name: "Operations manager" });
     if (role === "pod_lead") {
@@ -48,7 +59,7 @@ function RoleSwitcher() {
         <option value="pod_lead">Pod lead</option>
         <option value="employee">Employee</option>
       </select>
-      {actor.role === "pod_lead" && (
+      {actor.role === "pod_lead" && pods.length > 0 && (
         <select aria-label="Pod" value={actor.podId} onChange={(e) => {
           const pod = pods.find((p) => p.id === e.target.value);
           changeActor({ role: "pod_lead", podId: pod?.id, name: employees.find((x) => x.id === pod?.lead_employee_id)?.name ?? "Pod lead" });
@@ -56,7 +67,7 @@ function RoleSwitcher() {
           {pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       )}
-      {actor.role === "employee" && (
+      {actor.role === "employee" && employees.length > 0 && (
         <select aria-label="Employee" value={actor.employeeId} onChange={(e) => {
           changeActor({ role: "employee", employeeId: e.target.value, name: employees.find((x) => x.id === e.target.value)?.name ?? "Employee" });
         }}>

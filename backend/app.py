@@ -33,11 +33,9 @@ def handle_not_configured(_: Request, exc: NotConfigured):
 
 @app.exception_handler(psycopg.OperationalError)
 def handle_database_down(_: Request, exc: psycopg.OperationalError):
-    log.error("Database unavailable: %s", type(exc).__name__)
-    return JSONResponse(
-        status_code=503,
-        content={"detail": "The database is not reachable. A free Supabase project pauses after a week of low activity; restore it from the Supabase dashboard, then try again."},
-    )
+    text = str(exc)
+    log.error("Database connection failed: %s", db.redact(text))
+    return JSONResponse(status_code=503, content={"detail": db.describe_connection_failure(text)})
 
 
 @app.get("/api/health")

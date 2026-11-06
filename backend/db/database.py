@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Iterator
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
 
 from backend.engine import domain as d
+
+
+POOLER_PORT = 6543
 
 
 class NotConfigured(RuntimeError):
@@ -19,8 +24,47 @@ class NotConfigured(RuntimeError):
 def database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
-        raise NotConfigured("DATABASE_URL is not set. Add it to the environment and redeploy.")
+        raise NotConfigured("DATABASE_URL is not set. Add it in Vercel's Environment Variables, then redeploy.")
+    check_url_shape(url)
     return url
+
+
+def check_url_shape(url: str) -> None:
+    """Catch the common paste mistakes, with a message that says which one it is."""
+    fix = "Correct DATABASE_URL in Vercel's Environment Variables, then redeploy."
+    if not url.startswith(("postgresql://", "postgres://")):
+        raise NotConfigured(f"DATABASE_URL must start with postgresql://. Paste only the string, with no quotes and no 'DATABASE_URL=' in front. {fix}")
+    if "[" in url or "]" in url:
+        raise NotConfigured(f"DATABASE_URL still contains square brackets. Replace [YOUR-PASSWORD], including the brackets, with your database password. {fix}")
+    try:
+        parts = urlsplit(url)
+        host, port = parts.hostname or "", parts.port
+    except ValueError:
+        raise NotConfigured(f"DATABASE_URL could not be read, usually because the password contains a symbol such as @ / : or #. Reset the database password to letters and numbers only. {fix}")
+    if parts.username is None or parts.password is None or not host:
+        raise NotConfigured(f"DATABASE_URL is missing its username, password or host. Copy it again from Connect in Supabase. {fix}")
+    if host.startswith("db.") and host.endswith(".supabase.co"):
+        raise NotConfigured(f"DATABASE_URL uses Supabase's direct connection, which Vercel cannot reach. In Supabase, click Connect, choose Transaction pooler, and use that string (port {POOLER_PORT}). {fix}")
+
+
+def describe_connection_failure(text: str) -> str:
+    """Turn a driver error into a plain reason. Never includes the connection details."""
+    lowered = text.lower()
+    if "password authentication failed" in lowered:
+        return "Supabase rejected the password in DATABASE_URL. Check it matches your database password, or reset the password in Supabase, then update the variable in Vercel and redeploy."
+    if "tenant or user not found" in lowered:
+        return "Supabase does not recognise the username or pooler host in DATABASE_URL. Copy the whole Transaction pooler string again from Connect in Supabase, then update the variable in Vercel and redeploy."
+    if any(x in lowered for x in ("could not translate host", "name or service not known", "name resolution", "nodename nor servname", "network is unreachable")):
+        return "The database host in DATABASE_URL could not be reached. Copy the Transaction pooler string again from Connect in Supabase, then update the variable in Vercel and redeploy."
+    if any(x in lowered for x in ("timeout", "timed out")):
+        return "The database did not respond in time. Check that the Supabase project is running, and that the pooler string is the current one from Connect."
+    if any(x in lowered for x in ("too many", "max client", "remaining connection slots")):
+        return "The database has too many open connections right now. Wait a minute and try again."
+    return "The database connection failed. The reason is in Vercel's Logs for this request."
+
+
+def redact(text: str) -> str:
+    return re.sub(r"(://[^:/@\s]+:)[^@\s]+@", r"\1***@", text)
 
 
 @contextmanager
@@ -30,7 +74,11 @@ def connect() -> Iterator[psycopg.Connection]:
     Serverless functions cannot share a pool, so this relies on Supabase's pooler.
     prepare_threshold=None is required by its transaction mode.
     """
-    with psycopg.connect(database_url(), row_factory=dict_row, prepare_threshold=None, connect_timeout=10) as conn:
+    try:
+        conn = psycopg.connect(database_url(), row_factory=dict_row, prepare_threshold=None, connect_timeout=10)
+    except psycopg.ProgrammingError:
+        raise NotConfigured("DATABASE_URL could not be read. Copy the Transaction pooler string again from Connect in Supabase, then update the variable in Vercel and redeploy.")
+    with conn:
         yield conn
 
 
