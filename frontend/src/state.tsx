@@ -1,24 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, setActor, type Actor, type Bootstrap, type RosterDetail, type RosterRow } from "./api";
-import { makeNames, type Names } from "./lib";
+import { makeNames, readPref as read, writePref as write, type Names } from "./lib";
 
 export type Page = "board" | "plans" | "availability" | "approvals" | "setup" | "activity";
-
-function read(key: string, fallback: string) {
-  try {
-    return localStorage.getItem(key) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-function write(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* private window: the choice simply is not remembered */
-  }
-}
 
 interface AppState {
   page: Page;

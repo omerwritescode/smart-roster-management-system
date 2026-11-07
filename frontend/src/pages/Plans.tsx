@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Metrics, type PlanResult, type RosterRow } from "../api";
 import { useAction, useApp } from "../state";
 import { PLAN_LABEL, ROSTER_STATUS, formatTime, monthLabel } from "../lib";
+import { PageHeader } from "../components/Layout";
 
 type Metric = { key: keyof Metrics; label: string; better: "high" | "low"; suffix?: string; help: string };
 const ROWS: Metric[] = [
@@ -35,19 +36,15 @@ export function PlansPage() {
 
   return (
     <div className="stack">
-      <div className="spread">
-        <div>
-          <h1>Compare plans for {monthLabel(month)}</h1>
-          <p className="muted" style={{ maxWidth: "70ch" }}>
-            Every plan keeps the same mandatory rules and the same coverage. They differ in how they use the freedom left over.
-          </p>
-        </div>
-        {isOps && (
+      <PageHeader
+        title={`Compare plans for ${monthLabel(month)}`}
+        intro="Every plan keeps the same mandatory rules and fills the same number of required slots. They differ in how they use the freedom left over: fairness, preferences or backup use. The best value in each row is highlighted."
+        actions={isOps && (
           <button className="btn primary" disabled={compare.isPending} onClick={() => compare.mutate(undefined)}>
             {compare.isPending ? <><span className="spinner" />Solving three plans, about 40 seconds</> : "Generate all three plans"}
           </button>
         )}
-      </div>
+      />
 
       {selected.length === 0 ? (
         <div className="panel empty">

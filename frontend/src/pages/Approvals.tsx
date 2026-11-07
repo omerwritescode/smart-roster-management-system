@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Pod } from "../api";
 import { useAction, useApp, useRoster } from "../state";
 import { PLAN_LABEL, ROSTER_STATUS, formatTime, monthLabel } from "../lib";
+import { PageHeader } from "../components/Layout";
 
 function PodRow({ pod, rosterId, decision, inReview }: { pod: Pod; rosterId: string; decision?: { decision: string; actor: string; note: string }; inReview: boolean }) {
   const { actor, names, canManage } = useApp();
@@ -63,17 +64,17 @@ export function ApprovalsPage() {
 
   return (
     <div className="stack">
-      <div className="spread">
-        <div>
-          <h1>Approve {monthLabel(month)}</h1>
-          <p className="muted">Version {r.version}, {PLAN_LABEL[r.plan_label] ?? r.plan_label}. Status: {ROSTER_STATUS[r.status]}.</p>
-        </div>
-        <label className="field"><span>Version</span>
-          <select value={rosterId} onChange={(e) => openRoster(e.target.value)}>
-            {rosters.map((x) => <option key={x.id} value={x.id}>Version {x.version}: {ROSTER_STATUS[x.status]}</option>)}
-          </select>
-        </label>
-      </div>
+      <PageHeader
+        title={`Approve ${monthLabel(month)}`}
+        intro={<>Three steps, in order. Version {r.version}, {PLAN_LABEL[r.plan_label] ?? r.plan_label}, is currently at <b>{ROSTER_STATUS[r.status]?.toLowerCase()}</b>.</>}
+        actions={
+          <label className="row small" style={{ gap: 6 }}><span className="muted">Version</span>
+            <select value={rosterId} onChange={(e) => openRoster(e.target.value)}>
+              {rosters.map((x) => <option key={x.id} value={x.id}>Version {x.version}: {ROSTER_STATUS[x.status]}</option>)}
+            </select>
+          </label>
+        }
+      />
 
       <section className="panel stack">
         <h2>1. Clear the blockers</h2>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Bootstrap } from "../api";
 import { useAction, useApp } from "../state";
 import { CALENDAR_LABEL, WEEKDAYS, cx, formatDay, type Names } from "../lib";
+import { PageHeader } from "../components/Layout";
 
 type Row = Record<string, unknown> & { id: string };
 type Field =
@@ -319,8 +320,10 @@ export function SetupPage() {
 
   return (
     <div className="stack">
-      <h1>Setup</h1>
-      <p className="muted" style={{ maxWidth: "75ch" }}>Everything here is data. Adding a brand, pod, process, person or rule takes effect on the next check, with no code change.</p>
+      <PageHeader
+        title="Setup"
+        intro="Everything the roster is built from. Adding a brand, pod, process, person or rule takes effect on the next check, with no code change."
+      />
       <div className="tabs" role="tablist" aria-label="Setup lists">
         {ENTITIES.map((e) => <button key={e.id} role="tab" aria-selected={tab === e.id} onClick={() => { setTab(e.id); setEditing(null); setFilter(""); }}>{e.label}</button>)}
         <button role="tab" aria-selected={tab === "settings"} onClick={() => { setTab("settings"); setEditing(null); }}>Company rules</button>

@@ -17,6 +17,11 @@ export const CALENDAR_LABEL: Record<string, string> = {
 };
 export const LEAVE_LABEL: Record<string, string> = { planned: "Planned leave", sick: "Sick leave", comp_off: "Comp-off", unavailable: "Unavailable" };
 export const PLAN_LABEL: Record<string, string> = { coverage_first: "Coverage first", fairness_first: "Fairness first", preference_first: "Preference first" };
+export const PLAN_DESCRIPTION: Record<string, string> = {
+  coverage_first: "Fills every required day it can, using backups freely. The usual choice.",
+  fairness_first: "Spreads Sundays, holidays and backup duty as evenly as it can.",
+  preference_first: "Honours preferred days off and shifts wherever coverage still holds.",
+};
 export const ROSTER_STATUS: Record<string, string> = {
   draft: "Draft", pod_review: "Pod lead review", ops_review: "Operations approval", published: "Published", superseded: "Replaced", rejected: "Rejected",
 };
@@ -92,3 +97,46 @@ export function makeNames(b: Bootstrap): Names {
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
+
+/** Per-viewer conveniences only. Storage can be missing or blocked, so every call is guarded. */
+export function readPref(key: string, fallback: string) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+export function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* not remembered in this browser */
+  }
+}
+
+/** Plain titles for each kind of issue, used to group the review list. */
+export const ISSUE_TITLE: Record<string, string> = {
+  DAYS_MISSING: "Days missing from the roster",
+  LEAVE_NOT_HONOURED: "Working on approved leave",
+  ASSIGNED_WHEN_OFF: "Assigned on a day off",
+  NOT_ALLOCATED: "Working a process they are not allocated to",
+  WORKLOAD_EXCEEDED: "Over the workload limit",
+  SHIFT_CLASH: "Overlapping shifts",
+  REST_TOO_SHORT: "Too little rest between shifts",
+  WEEKLY_OFF_MISSING: "Weekly off missing",
+  MAX_CONSECUTIVE_EXCEEDED: "Too many days in a row",
+  ASSIGNED_ON_CLOSED_DAY: "Work on a closed day",
+  STRETCH_USED: "Stretched past a full day",
+  WEEKLY_OFF_EXCESS: "Extra weekly offs",
+  WEEKLY_OFF_PATTERN: "Weekly off moved from its pattern",
+  MULTI_BRAND_IMPACT: "One absence, several brands",
+  NO_BACKUP_CONFIGURED: "No backup set up",
+  OVERALLOCATED: "Allocated past a full day",
+  PREFERRED_OFF_MISSED: "Preferred days off not given",
+  AVOIDED_SHIFT_USED: "Avoided shifts used",
+  SUNDAY_HOLIDAY_IMBALANCE: "Uneven Sundays and holidays",
+  PENDING_LEAVE_CLASH: "Pending requests that clash with work",
+  COMP_OFF_OVERDRAWN: "Comp-off balance overdrawn",
+  HOLIDAY_WORKED: "Holiday work, earning a comp-off",
+  WEEKLY_OFF_ON_HOLIDAY: "Weekly off falling on a holiday",
+};

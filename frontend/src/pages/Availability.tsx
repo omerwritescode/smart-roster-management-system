@@ -4,6 +4,7 @@ import { api, type AbsenceImpact, type Change, type Leave, type LedgerEntry } fr
 import { useAction, useApp } from "../state";
 import { LEAVE_LABEL, STATUS_LABEL, formatDay, monthLabel } from "../lib";
 import { Sheet } from "../components/Sheets";
+import { PageHeader } from "../components/Layout";
 
 interface Decision { status: string; regenerated: boolean; roster_id?: string; summary?: string; changes?: Change[]; based_on_version?: number }
 
@@ -154,9 +155,14 @@ export function AvailabilityPage() {
 
   return (
     <div className="stack">
-      <h1>Availability for {monthLabel(month)}</h1>
-      {canManage && <WhatIf />}
+      <PageHeader
+        title={`Availability for ${monthLabel(month)}`}
+        intro="Test what an absence would do before deciding, then approve or reject requests. Approving leave builds a new draft roster with as few changes as possible; nothing goes live until it is published."
+      />
       {decide.isPending && <div className="notice"><span className="spinner" />Saving the decision and regenerating the roster, up to 20 seconds</div>}
+      <div className="cols">
+      <div className="stack">
+      {canManage && <WhatIf />}
 
       <section className="panel stack">
         <h2>Request time off</h2>
@@ -175,7 +181,9 @@ export function AvailabilityPage() {
           <button className="btn primary" disabled={create.isPending} onClick={() => create.mutate(form)}>Add request</button>
         </div>
       </section>
+      </div>
 
+      <div className="stack">
       <section className="stack">
         <h2>Waiting for a decision ({pending.length})</h2>
         {pending.length === 0 ? <p className="muted small">No requests are waiting.</p> : (
@@ -204,6 +212,8 @@ export function AvailabilityPage() {
           ))}
         </div>
       </section>
+      </div>
+      </div>
 
       {decision?.regenerated && (
         <Sheet title="New draft ready" subtitle={decision.summary} onClose={() => setDecision(null)} foot={

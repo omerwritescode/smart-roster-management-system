@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type AuditEntry, type Notification } from "../api";
 import { useAction, useApp } from "../state";
 import { formatTime } from "../lib";
+import { PageHeader } from "../components/Layout";
 
 export function ActivityPage() {
   const { actor, names, isOps } = useApp();
@@ -15,13 +16,11 @@ export function ActivityPage() {
 
   return (
     <div className="stack">
-      <div className="spread">
-        <h1>{person ? `Notifications for ${names!.employee(person)}` : "Notifications"}</h1>
-        <button className="btn" onClick={() => markRead.mutate(undefined)}>Mark all as read</button>
-      </div>
-      <p className="muted small" style={{ maxWidth: "75ch" }}>
-        When a published roster changes, everyone affected sees what changed here. An optional webhook sends the same event to tools such as n8n.
-      </p>
+      <PageHeader
+        title={person ? `Notifications for ${names!.employee(person)}` : "Notifications"}
+        intro="When a published roster changes, everyone affected sees what changed for them here. An optional webhook sends the same event to tools such as n8n."
+        actions={<button className="btn" onClick={() => markRead.mutate(undefined)}>Mark all as read</button>}
+      />
       <div className="panel" style={{ padding: 0 }}>
         {(notes.data ?? []).length === 0 && <p className="muted small" style={{ padding: 14 }}>Nothing yet. Notifications appear when a roster is sent for review or published.</p>}
         {(notes.data ?? []).map((n) => (

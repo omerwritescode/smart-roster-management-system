@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { api, type Issue, type RosterDetail } from "../api";
 import { useAction, useApp } from "../state";
-import { cx } from "../lib";
+import { ISSUE_TITLE, cx, formatDay } from "../lib";
 import type { SheetState } from "./Sheets";
 
 const CAUSE_TAG: Record<string, string> = { weekly_off: "Weekly off clash", leave: "Leave clash", capacity: "No capacity", shift_clash: "Incompatible shifts" };
-type Filter = "blocker" | "warning" | "info";
 
 function IssueRow({ issue, detail, setSheet }: { issue: Issue; detail: RosterDetail; setSheet: (s: SheetState) => void }) {
   const { isOps, say } = useApp();
@@ -24,7 +23,7 @@ function IssueRow({ issue, detail, setSheet }: { issue: Issue; detail: RosterDet
   return (
     <div className={cx("issue", issue.severity, issue.override_reason && "overridden")}>
       <div className="row" style={{ marginBottom: 2 }}>
-        {(issue.facts.causes ?? []).map((c) => <span className="tag blocker" key={c}>{CAUSE_TAG[c] ?? c}</span>)}
+        {date && <b className="issue-date">{formatDay(date)}</b>}
         {issue.override_reason && <span className="tag">Overridden</span>}
       </div>
       <p>{issue.message}</p>
@@ -61,9 +60,52 @@ function IssueRow({ issue, detail, setSheet }: { issue: Issue; detail: RosterDet
   );
 }
 
-export function IssuesPanel({ detail, scope, setSheet }: { detail: RosterDetail; scope: { employeeId?: string; podId?: string; brandId?: string }; setSheet: (s: SheetState) => void }) {
-  const { setup } = useApp();
-  const [filter, setFilter] = useState<Filter>("blocker");
+export type Severity = "blocker" | "warning" | "info";
+
+interface Group { key: string; title: string; issues: Issue[]; causes: string[]; first: string }
+
+function groupIssues(issues: Issue[], names: NonNullable<ReturnType<typeof useApp>["names"]>): Group[] {
+  const groups = new Map<string, Group>();
+  for (const i of issues) {
+    const byProcess = i.category === "coverage" && i.brand_process_id && i.code !== "MULTI_BRAND_IMPACT";
+    const key = byProcess ? `bp:${i.brand_process_id}` : `code:${i.code}`;
+    const title = byProcess ? names.process(i.brand_process_id!) : ISSUE_TITLE[i.code] ?? i.code.replace(/_/g, " ").toLowerCase();
+    const g = groups.get(key) ?? { key, title, issues: [], causes: [], first: i.date ?? "9999" };
+    g.issues.push(i);
+    for (const c of i.facts.causes ?? []) if (!g.causes.includes(c)) g.causes.push(c);
+    if ((i.date ?? "9999") < g.first) g.first = i.date ?? "9999";
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => a.first.localeCompare(b.first) || a.title.localeCompare(b.title));
+}
+
+function IssueGroup({ group, detail, setSheet, open }: { group: Group; detail: RosterDetail; setSheet: (s: SheetState) => void; open: boolean }) {
+  const overridden = group.issues.filter((i) => i.override_reason).length;
+  const isGap = group.key.startsWith("bp:");
+  const count = group.issues.length;
+  return (
+    <details className="igroup" open={open}>
+      <summary>
+        <span className="igroup-title">{group.title}</span>
+        <span className="igroup-meta">
+          {isGap ? `short on ${count} day${count === 1 ? "" : "s"}` : `${count}`}
+          {overridden > 0 && `, ${overridden} overridden`}
+        </span>
+        {group.causes.length > 0 && (
+          <span className="igroup-tags">{group.causes.map((c) => <span className="tag blocker" key={c}>{CAUSE_TAG[c] ?? c}</span>)}</span>
+        )}
+      </summary>
+      {group.issues.slice(0, 60).map((i) => <IssueRow key={i.key} issue={i} detail={detail} setSheet={setSheet} />)}
+      {count > 60 && <p className="faint" style={{ padding: "6px 12px" }}>And {count - 60} more of the same kind.</p>}
+    </details>
+  );
+}
+
+export function IssuesPanel({ detail, scope, setSheet, filter, setFilter, onHide }: {
+  detail: RosterDetail; scope: { employeeId?: string; podId?: string; brandId?: string }; setSheet: (s: SheetState) => void;
+  filter: Severity; setFilter: (f: Severity) => void; onHide: () => void;
+}) {
+  const { setup, names } = useApp();
   const employeesInPod = new Set(setup!.employees.filter((e) => e.pod_id === scope.podId).map((e) => e.id));
   const bpOf = new Map(setup!.brand_processes.map((b) => [b.id, b.brand_id]));
   const brandPod = new Map(setup!.brands.map((b) => [b.id, b.pod_id]));
@@ -78,27 +120,46 @@ export function IssuesPanel({ detail, scope, setSheet }: { detail: RosterDetail;
     return true;
   };
   const scoped = detail.issues.filter(inScope);
+  const overriddenCount = scoped.filter((i) => i.severity === "blocker" && i.override_reason).length;
   const counts = {
-    blocker: scoped.filter((i) => i.severity === "blocker").length,
+    blocker: scoped.filter((i) => i.severity === "blocker" && !i.override_reason).length,
     warning: scoped.filter((i) => i.severity === "warning").length,
     info: scoped.filter((i) => i.severity === "info").length,
   };
-  const shown = scoped.filter((i) => i.severity === filter);
-  const filters: [Filter, string][] = [["blocker", `Blockers ${counts.blocker}`], ["warning", `Warnings ${counts.warning}`], ["info", `Notes ${counts.info}`]];
+  const groups = groupIssues(scoped.filter((i) => i.severity === filter), names!);
+  const filters: [Severity, string, number][] = [["blocker", "Blockers", counts.blocker], ["warning", "Warnings", counts.warning], ["info", "Notes", counts.info]];
+  const scoped_note = scope.employeeId || scope.podId || scope.brandId ? "Showing only what affects the current view." : null;
+  const help: Record<Severity, string> = {
+    blocker: "These stop publishing. Find cover, or override with a written reason.",
+    warning: "Worth a look, but they do not stop publishing.",
+    info: "Context only. Nothing to do.",
+  };
   return (
-    <section className="panel issues" style={{ padding: 0 }} aria-label="Issues to review">
+    <section className="panel issues" aria-label="Issues to review">
       <div className="issues-head">
-        <h2>Before publishing</h2>
-        <div className="tabs" role="tablist" aria-label="Issue severity">
-          {filters.map(([id, label]) => <button key={id} role="tab" aria-selected={filter === id} onClick={() => setFilter(id)}>{label}</button>)}
+        <div className="spread">
+          <h2>To review</h2>
+          <button className="btn tiny" onClick={onHide} title="Give the roster the full width">Hide</button>
         </div>
+        <div className="seg" role="tablist" aria-label="Issue severity">
+          {filters.map(([id, label, n]) => (
+            <button key={id} role="tab" aria-selected={filter === id} className={id} onClick={() => setFilter(id)}>
+              {label} <b>{n}</b>
+            </button>
+          ))}
+        </div>
+        <p className="faint">
+          {help[filter]}
+          {filter === "blocker" && overriddenCount > 0 && ` ${overriddenCount} more already have an override and are listed for the record.`}
+          {scoped_note && ` ${scoped_note}`}
+        </p>
       </div>
-      {shown.length === 0 && (
-        <p className="muted small" style={{ padding: 12 }}>
-          {filter === "blocker" ? "No blockers here. Coverage and mandatory rules are met." : "Nothing to review here."}
+      {groups.length === 0 && (
+        <p className="muted small" style={{ padding: 14 }}>
+          {filter === "blocker" ? "Nothing blocks publishing here." : "Nothing here."}
         </p>
       )}
-      {shown.slice(0, 120).map((i) => <IssueRow key={i.key} issue={i} detail={detail} setSheet={setSheet} />)}
+      {groups.map((g, n) => <IssueGroup key={g.key} group={g} detail={detail} setSheet={setSheet} open={groups.length <= 3 || n === 0} />)}
     </section>
   );
 }

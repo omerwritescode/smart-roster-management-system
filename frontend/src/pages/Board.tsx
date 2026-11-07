@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Assignment, type Change, type CoverageCell, type Issue, type RosterDetail, type RosterDay } from "../api";
 import { useAction, useApp, useRoster } from "../state";
-import { STATUS_LABEL, STATUS_SHORT, ROSTER_STATUS, PLAN_LABEL, WEEKDAYS, cx, dayNumber, formatDay, monthLabel, monthOptions, weekdayIndex } from "../lib";
+import { STATUS_LABEL, STATUS_SHORT, ROSTER_STATUS, PLAN_LABEL, PLAN_DESCRIPTION, WEEKDAYS, cx, dayNumber, formatDay, monthLabel, monthOptions, readPref, weekdayIndex, writePref } from "../lib";
 import { DaySheet, EmployeeDaySheet, ProcessDaySheet, type SheetState } from "../components/Sheets";
-import { IssuesPanel } from "../components/Issues";
+import { IssuesPanel, type Severity } from "../components/Issues";
+import { Menu, PageHeader } from "../components/Layout";
+import { NextStep } from "../components/NextStep";
 
 type View = "company" | "pod" | "brand" | "process" | "employee";
 const VIEWS: { id: View; label: string }[] = [
@@ -14,25 +16,6 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "process", label: "Process" },
   { id: "employee", label: "Employee" },
 ];
-const PIPELINE = [
-  ["draft", "Draft"],
-  ["pod_review", "Pod lead review"],
-  ["ops_review", "Operations approval"],
-  ["published", "Published"],
-] as const;
-
-function Pipeline({ status }: { status: string }) {
-  const index = PIPELINE.findIndex(([id]) => id === status);
-  if (index < 0) return <span className="tag">{ROSTER_STATUS[status] ?? status}</span>;
-  return (
-    <ol className="pipeline" aria-label="Approval progress">
-      {PIPELINE.map(([id, label], i) => (
-        <li key={id} className={cx(i < index && "done", i === index && "now")} aria-current={i === index ? "step" : undefined}>{label}</li>
-      ))}
-    </ol>
-  );
-}
-
 function Legend() {
   return (
     <div className="legend">
@@ -295,9 +278,110 @@ function EmployeeCalendar({ detail, index, employeeId, setSheet }: { detail: Ros
   );
 }
 
+function StartHere({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <section className="starthere" aria-label="How to use this roster">
+      <div className="spread">
+        <h2>How to read this roster</h2>
+        <button className="btn tiny" onClick={onDismiss}>Got it</button>
+      </div>
+      <ul>
+        <li><i className="sw gap" aria-hidden="true" /><span><b>Red numbers under a date</b> are staffing gaps. Click the date to see who is working that day.</span></li>
+        <li><i className="sw work" aria-hidden="true" /><span><b>Click anyone's day</b> to change it. The impact shows before you save.</span></li>
+        <li><i className="sw cover" aria-hidden="true" /><span><b>Blue days</b> are backups covering for someone. Brand and Process views show coverage per process.</span></li>
+        <li><i className="sw off" aria-hidden="true" /><span><b>Testing an absence</b> is on the Availability page. Nothing changes until you confirm.</span></li>
+      </ul>
+    </section>
+  );
+}
+
+function NewVersionMenu({ month, detail, onCreated }: { month: string; detail?: RosterDetail; onCreated: (id: string) => void }) {
+  const [plan, setPlan] = useState("coverage_first");
+  const [from, setFrom] = useState("");
+  const generate = useAction((input: { month: string; plan: string }) => api.post<{ roster_id: string; summary: string }>("/rosters/generate", input), {
+    success: (r) => `New version generated. ${r.summary}`,
+    onDone: (r) => onCreated(r.roster_id),
+  });
+  const repair = useAction((input: { id: string; change_from: string | null }) => api.post<{ roster_id: string; summary: string }>(`/rosters/${input.id}/repair`, { change_from: input.change_from }), {
+    success: (r) => r.summary,
+    onDone: (r) => onCreated(r.roster_id),
+  });
+  const busy = generate.isPending || repair.isPending;
+  return (
+    <Menu label={busy ? <><span className="spinner" />Solving, up to 20 seconds</> : "New version"}>
+      {(close) => (
+        <div className="stack" style={{ width: "min(360px, 86vw)" }}>
+          <div className="stack" style={{ gap: 6 }}>
+            <h3>Generate the month from scratch</h3>
+            {Object.entries(PLAN_LABEL).map(([id, label]) => (
+              <label key={id} className={cx("planpick", plan === id && "on")}>
+                <input type="radio" name="plan" checked={plan === id} onChange={() => setPlan(id)} />
+                <span><b>{label}</b><br /><span className="faint">{PLAN_DESCRIPTION[id]}</span></span>
+              </label>
+            ))}
+            <button className="btn primary" disabled={busy} onClick={() => { close(); generate.mutate({ month, plan }); }}>Generate {monthLabel(month)}</button>
+          </div>
+          {detail && (
+            <div className="stack" style={{ gap: 6, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+              <h3>Regenerate from a date</h3>
+              <p className="faint">Keeps earlier days and manual edits, and changes as little as possible. Saved as a new draft.</p>
+              <div className="row">
+                <input type="date" aria-label="Regenerate from this date" value={from} min={detail.days_in_month[0]} max={detail.days_in_month[detail.days_in_month.length - 1]} onChange={(e) => setFrom(e.target.value)} />
+                <button className="btn" disabled={busy} onClick={() => { close(); repair.mutate({ id: detail.roster.id, change_from: from || null }); }}>Regenerate</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Menu>
+  );
+}
+
+function EmptyMonth({ month, onCreated }: { month: string; onCreated: (id: string) => void }) {
+  const { isOps, changeActor } = useApp();
+  const [plan, setPlan] = useState("coverage_first");
+  const generate = useAction((input: { month: string; plan: string }) => api.post<{ roster_id: string; summary: string }>("/rosters/generate", input), {
+    success: (r) => `Roster generated. ${r.summary}`,
+    onDone: (r) => onCreated(r.roster_id),
+  });
+  if (generate.isPending) {
+    return (
+      <section className="panel empty">
+        <h2><span className="spinner" />Building the {monthLabel(month)} roster</h2>
+        <p className="muted" style={{ maxWidth: "56ch" }}>
+          First the solver finds the fewest gaps any roster can have without breaking a rule. Then it balances preferences, fairness and backup use. This takes up to 20 seconds.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="panel empty">
+      <h2>No roster for {monthLabel(month)} yet</h2>
+      <p className="muted" style={{ maxWidth: "60ch" }}>
+        The solver decides everyone's weekly offs and duties for the month, then lists anything it cannot cover. Nothing goes live until a person approves it.
+      </p>
+      {isOps ? (
+        <>
+          <div className="planrow" role="radiogroup" aria-label="Plan">
+            {Object.entries(PLAN_LABEL).map(([id, label]) => (
+              <label key={id} className={cx("planpick", plan === id && "on")}>
+                <input type="radio" name="emptyplan" checked={plan === id} onChange={() => setPlan(id)} />
+                <span><b>{label}</b><br /><span className="faint">{PLAN_DESCRIPTION[id]}</span></span>
+              </label>
+            ))}
+          </div>
+          <button className="btn primary big" onClick={() => generate.mutate({ month, plan })}>Generate {monthLabel(month)}</button>
+        </>
+      ) : (
+        <button className="btn primary" onClick={() => changeActor({ role: "ops_manager", name: "Operations manager" })}>Switch to operations manager to generate</button>
+      )}
+    </section>
+  );
+}
+
 export function BoardPage() {
   const app = useApp();
-  const { month, setMonth, rosterId, openRoster, rosters, isOps, setup, names, actor, go } = app;
+  const { month, setMonth, rosterId, openRoster, rosters, isOps, setup, names, actor } = app;
   const roster = useRoster(rosterId);
   const [view, setView] = useState<View>("company");
   const [pod, setPod] = useState(setup!.pods[0]?.id ?? "");
@@ -305,22 +389,15 @@ export function BoardPage() {
   const [processId, setProcessId] = useState("all");
   const [employee, setEmployee] = useState(setup!.employees[0]?.id ?? "");
   const [sheet, setSheet] = useState<SheetState | null>(null);
-  const [plan, setPlan] = useState("coverage_first");
-  const [from, setFrom] = useState("");
+  const [filter, setFilter] = useState<Severity>("blocker");
+  const [issuesOpen, setIssuesOpen] = useState(() => readPref("roster.issues", "open") === "open");
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [guide, setGuide] = useState(() => readPref("roster.guide", "show") === "show");
 
   useEffect(() => {
     if (actor.role === "employee" && actor.employeeId) { setView("employee"); setEmployee(actor.employeeId); }
     if (actor.role === "pod_lead" && actor.podId) { setView("pod"); setPod(actor.podId); }
   }, [actor]);
-
-  const generate = useAction((input: { month: string; plan: string }) => api.post<{ roster_id: string; summary: string }>("/rosters/generate", input), {
-    success: (r) => `Roster generated. ${r.summary}`,
-    onDone: (r) => openRoster(r.roster_id),
-  });
-  const repair = useAction((input: { id: string; change_from: string | null }) => api.post<{ roster_id: string; summary: string }>(`/rosters/${input.id}/repair`, { change_from: input.change_from }), {
-    success: (r) => r.summary,
-    onDone: (r) => openRoster(r.roster_id),
-  });
 
   const detail = roster.data;
   const parent = detail?.roster.parent_id;
@@ -351,92 +428,86 @@ export function BoardPage() {
     bpIds: activeBps.filter((x) => x.process_id === p.id).map((x) => x.id),
   })).filter((g) => g.bpIds.length > 0);
 
-  const m = detail?.roster.metrics;
-  const unresolved = detail ? detail.issues.filter((i) => i.severity === "blocker" && !i.override_reason).length : 0;
+  const blockers = detail ? detail.issues.filter((i) => i.severity === "blocker" && !i.override_reason) : [];
+  const showIssues = (severity: Severity) => { setFilter(severity); setIssuesOpen(true); writePref("roster.issues", "open"); };
+  const hideIssues = () => { setIssuesOpen(false); writePref("roster.issues", "closed"); };
+  const firstBlocker = () => {
+    const b = blockers[0];
+    if (!b) return;
+    const date = b.date?.slice(0, 10);
+    if (b.brand_process_id && date) setSheet({ kind: "process", brandProcessId: b.brand_process_id, date });
+    else if (b.employee_id && date) setSheet({ kind: "employee", employeeId: b.employee_id, date });
+    else showIssues("blocker");
+  };
+  const versionLabel = (r: { version: number; plan_label: string; status: string }) => `Version ${r.version}, ${PLAN_LABEL[r.plan_label] ?? r.plan_label}, ${ROSTER_STATUS[r.status]?.toLowerCase()}`;
 
   return (
     <>
-      <div className="monthbar">
-        <label className="field"><span>Month</span>
-          <select value={month} onChange={(e) => setMonth(e.target.value)}>
-            {monthOptions().map((x) => <option key={x} value={x}>{monthLabel(x)}</option>)}
-          </select>
-        </label>
-        {rosters.length > 0 && (
-          <label className="field"><span>Version</span>
-            <select value={rosterId ?? ""} onChange={(e) => openRoster(e.target.value)}>
-              {rosters.map((r) => <option key={r.id} value={r.id}>Version {r.version}: {PLAN_LABEL[r.plan_label] ?? r.plan_label}, {ROSTER_STATUS[r.status]}</option>)}
+      <PageHeader
+        title={
+          <label className="titlepick">
+            <span className="sr-only">Month</span>
+            <select value={month} onChange={(e) => setMonth(e.target.value)}>
+              {monthOptions().map((x) => <option key={x} value={x}>{monthLabel(x)}</option>)}
             </select>
           </label>
-        )}
-        {isOps && (
+        }
+        actions={
           <>
-            <label className="field"><span>Plan</span>
-              <select value={plan} onChange={(e) => setPlan(e.target.value)}>
-                {Object.entries(PLAN_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            {isOps && <NewVersionMenu month={month} detail={detail} onCreated={openRoster} />}
+            {detail && (
+              <Menu label="Export">
+                {(close) => (
+                  <div className="menu-list">
+                    <a href={`/api/rosters/${detail.roster.id}/export.xlsx`} onClick={close}>Excel, formatted with three sheets</a>
+                    <a href={`/api/rosters/${detail.roster.id}/export.csv`} onClick={close}>CSV, one row per person per day</a>
+                  </div>
+                )}
+              </Menu>
+            )}
+          </>
+        }
+      >
+        {rosters.length > 0 && (
+          <div className="row small versionline">
+            <label className="row" style={{ gap: 6 }}>
+              <span className="muted">Showing</span>
+              <select value={rosterId ?? ""} onChange={(e) => openRoster(e.target.value)} aria-label="Version">
+                {rosters.map((r) => <option key={r.id} value={r.id}>{versionLabel(r)}</option>)}
               </select>
             </label>
-            <button className="btn primary" disabled={generate.isPending} onClick={() => generate.mutate({ month, plan })}>
-              {generate.isPending ? <><span className="spinner" />Solving, up to 20 seconds</> : `Generate ${monthLabel(month)}`}
-            </button>
-          </>
+            {diff.data && parent && diff.data.length > 0 && (
+              <span className="muted"><i className="sw changed" aria-hidden="true" />{diff.data.length} day(s) changed from the version before, outlined in orange</span>
+            )}
+          </div>
         )}
-        {detail && <Pipeline status={detail.roster.status} />}
-      </div>
+      </PageHeader>
 
-      {!rosterId && !generate.isPending && (
-        <div className="panel empty">
-          <h2>No roster for {monthLabel(month)} yet</h2>
-          <p className="muted">{isOps ? "Choose a plan and generate one. The solver takes up to 20 seconds and flags anything it cannot cover." : "The operations manager has not generated one. Switch role to operations manager to do it."}</p>
-          {isOps && <button className="btn primary" onClick={() => generate.mutate({ month, plan })}>Generate {monthLabel(month)}</button>}
-        </div>
-      )}
+      {!rosterId && <EmptyMonth month={month} onCreated={openRoster} />}
       {roster.error && <div className="notice error">{(roster.error as Error).message}</div>}
       {rosterId && !detail && !roster.error && <div className="loading"><span className="spinner" />Loading the roster</div>}
 
-      {detail && m && index && (
+      {detail && index && (
         <>
-          <div className="spread">
-            <div className="summary">
-              <span className={cx("figure", m.gap_slots > 0 ? "bad" : "ok")}><b>{m.coverage_pct}%</b><span>of required slots covered</span></span>
-              <span className={cx("figure", unresolved > 0 && "bad")}><b>{unresolved}</b><span>blockers to clear</span></span>
-              <span className="figure"><b>{m.warnings}</b><span>warnings</span></span>
-              <span className="figure"><b>{m.backup_days}</b><span>backup days</span></span>
-            </div>
-            <div className="row">
-              <a className="btn" href={`/api/rosters/${detail.roster.id}/export.xlsx`}>Export Excel</a>
-              <a className="btn" href={`/api/rosters/${detail.roster.id}/export.csv`}>Export CSV</a>
-              {isOps && (
-                <span className="row">
-                  <input type="date" aria-label="Regenerate from this date" value={from} min={detail.days_in_month[0]} max={detail.days_in_month[detail.days_in_month.length - 1]} onChange={(e) => setFrom(e.target.value)} />
-                  <button className="btn" disabled={repair.isPending} onClick={() => repair.mutate({ id: detail.roster.id, change_from: from || null })}
-                    title="Keeps earlier days and manual edits, changes as little as possible, and saves the result as a new draft.">
-                    {repair.isPending ? <><span className="spinner" />Regenerating</> : "Regenerate from date"}
-                  </button>
-                </span>
-              )}
-              <button className="btn" onClick={() => go("approvals")}>Review and approve</button>
-            </div>
-          </div>
-          <p className="muted small">
-            {detail.roster.summary}
-            {diff.data && parent && <> <b>{diff.data.length} day(s) differ</b> from the version this came from; they are outlined in orange.</>}
-          </p>
+          <NextStep detail={detail} unresolved={blockers.length} onFirstBlocker={firstBlocker} onShowIssues={showIssues} />
+          {guide && <StartHere onDismiss={() => { setGuide(false); writePref("roster.guide", "hide"); }} />}
 
-          <div className="board">
-            <div className="stack" style={{ minWidth: 0 }}>
-              <div className="spread">
-                <div className="tabs" role="tablist" aria-label="Roster view">
+          <div className={cx("board", !issuesOpen && "wide")}>
+            <div className="stack" style={{ minWidth: 0, gap: 8 }}>
+              <div className="toolbar">
+                <div className="seg" role="tablist" aria-label="Roster view">
                   {VIEWS.map((v) => <button key={v.id} role="tab" aria-selected={view === v.id} onClick={() => setView(v.id)}>{v.label}</button>)}
                 </div>
-                <div className="filters">
-                  {view === "pod" && <label className="field"><span>Pod</span><select value={pod} onChange={(e) => setPod(e.target.value)}>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
-                  {view === "brand" && <label className="field"><span>Brand</span><select value={brand} onChange={(e) => setBrand(e.target.value)}><option value="all">All brands</option>{setup!.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>}
-                  {view === "process" && <label className="field"><span>Process</span><select value={processId} onChange={(e) => setProcessId(e.target.value)}><option value="all">All processes</option>{setup!.processes.map((p) => <option key={p.id} value={p.id}>{p.code}: {p.name}</option>)}</select></label>}
-                  {view === "employee" && <label className="field"><span>Employee</span><select value={employee} onChange={(e) => setEmployee(e.target.value)}>{activeEmployees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label>}
-                </div>
+                {view === "pod" && <select aria-label="Pod" value={pod} onChange={(e) => setPod(e.target.value)}>{pods.map((p) => <option key={p.id} value={p.id}>{p.name} pod</option>)}</select>}
+                {view === "brand" && <select aria-label="Brand" value={brand} onChange={(e) => setBrand(e.target.value)}><option value="all">All brands</option>{setup!.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>}
+                {view === "process" && <select aria-label="Process" value={processId} onChange={(e) => setProcessId(e.target.value)}><option value="all">All processes</option>{setup!.processes.map((p) => <option key={p.id} value={p.id}>{p.code}: {p.name}</option>)}</select>}
+                {view === "employee" && <select aria-label="Employee" value={employee} onChange={(e) => setEmployee(e.target.value)}>{activeEmployees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>}
+                <span className="toolbar-gap" />
+                {view !== "employee" && <button className="btn tiny" aria-expanded={keyOpen} onClick={() => setKeyOpen(!keyOpen)}>{keyOpen ? "Hide colour key" : "Colour key"}</button>}
+                {!guide && <button className="btn tiny" onClick={() => { setGuide(true); writePref("roster.guide", "show"); }}>How to read this</button>}
+                {!issuesOpen && <button className="btn tiny" onClick={() => showIssues(filter)}>Show issues ({blockers.length} blockers)</button>}
               </div>
-              {view !== "employee" && <Legend />}
+              {keyOpen && view !== "employee" && <Legend />}
               {view === "company" && (
                 <PeopleGrid detail={detail} index={index} employeeIds={[]} setSheet={setSheet}
                   groups={[...podGroups(), ...(unpodded.length ? [{ title: "No pod", ids: unpodded }] : [])]} />
@@ -446,7 +517,10 @@ export function BoardPage() {
               {view === "process" && <ProcessGrid detail={detail} index={index} setSheet={setSheet} groups={processGroups} />}
               {view === "employee" && <EmployeeCalendar detail={detail} index={index} employeeId={employee} setSheet={setSheet} />}
             </div>
-            <IssuesPanel detail={detail} scope={view === "employee" ? { employeeId: employee } : view === "pod" ? { podId: pod } : view === "brand" && brand !== "all" ? { brandId: brand } : {}} setSheet={setSheet} />
+            {issuesOpen && (
+              <IssuesPanel detail={detail} filter={filter} setFilter={setFilter} onHide={hideIssues}
+                scope={view === "employee" ? { employeeId: employee } : view === "pod" ? { podId: pod } : view === "brand" && brand !== "all" ? { brandId: brand } : {}} setSheet={setSheet} />
+            )}
           </div>
         </>
       )}

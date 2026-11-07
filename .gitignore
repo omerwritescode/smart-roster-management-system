@@ -8,3 +8,7 @@ __pycache__/
 .pytest_cache/
 node_modules/
 frontend/dist/
+
+# Private working notes: kept locally, not published
+docs/demo-script.md
+docs/submission-email.md
